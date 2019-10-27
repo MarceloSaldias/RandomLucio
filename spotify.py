@@ -3,7 +3,7 @@ import requests
 import urllib.parse
 from requests.exceptions import HTTPError
 from pprint import pprint
-from keys import CLIENT_ID, CLIENT_SECRET, AUTH_CODE
+from keys import CLIENT_ID, CLIENT_SECRET
 import base64
 import time
 import json
@@ -18,7 +18,7 @@ def check_token(f):
         if time.time() >= self.token_info['expires_at']:
             print('Token expired!')
             self.refresh_token()
-        f(self,*args, **kwargs)
+        return f(self,*args, **kwargs)
     return inner
 
 class Spotify:
