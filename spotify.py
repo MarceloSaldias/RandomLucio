@@ -1,3 +1,4 @@
+from functools import wraps
 import requests
 import urllib.parse
 from requests.exceptions import HTTPError
@@ -6,6 +7,19 @@ from keys import CLIENT_ID, CLIENT_SECRET, AUTH_CODE
 import base64
 import time
 import json
+
+def check_token(f):
+    """
+    This decorator makes sure to check if the OAuth token has expired.
+    If it expired, it gets a new one from Spotify Web API.
+    """
+    @wraps(f)
+    def inner(self, *args, **kwargs):
+        if time.time() >= self.token_info['expires_at']:
+            print('Token expired!')
+            self.refresh_token()
+        f(self,*args, **kwargs)
+    return inner
 
 class Spotify:
 
@@ -42,6 +56,28 @@ class Spotify:
         url = 'https://accounts.spotify.com/authorize?%s' % data
         print(url)
         self.get_token(input())
+
+    def refresh_token(self):
+        """Gets a new OAuth token using the refresh token"""
+        payload = {'grant_type': 'refresh_token',
+                   'refresh_token': self.token_info['refresh_token']}
+        header = Spotify._make_headers(CLIENT_ID, CLIENT_SECRET)
+        response = requests.post('https://accounts.spotify.com/api/token',
+                                 headers=header,
+                                 data=payload,
+                                 verify=True)
+        try:
+            response.raise_for_status()
+            response = response.json()
+            self.token_info['access_token'] = response['access_token']
+            self.token_info['expires_at'] = int(time.time()) + response['expires_in']
+            if response.get('refresh_token'):
+                self.token_info['refresh_token'] = response['refresh_token']
+
+            Spotify.persist_json(self.token_info)
+            print('Token Refreshed succesfully')
+        except HTTPError as http_err:
+            print(f'HTTP error occured when refreshing from Spotify: \n{http_err}')
     
     def get_token(self, code):
         """Exchange the auth code for the auth token"""
@@ -52,7 +88,7 @@ class Spotify:
         response = requests.post('https://accounts.spotify.com/api/token',
                                  headers=header,
                                  data=payload,
-                                verify=True)
+                                 verify=True)
         try:
             response.raise_for_status()
             response = response.json()
@@ -62,7 +98,7 @@ class Spotify:
             Spotify.persist_json(self.token_info)
             print('Logged in succesfully')
         except HTTPError as http_err:
-            print(f'HTTP error occured {http_err}')
+            print(f'HTTP error occured when getting token from Spotify: \n{http_err}')
 
     def json_return(self, content, is_error=True):
         return {'status': 'ERROR' if is_error else 'OK',
@@ -79,6 +115,7 @@ class Spotify:
             if device['is_active']:
                 return device['id']
 
+    @check_token
     def get_current_song(self):
         url = self.base_url + 'me/player'
         try:
@@ -93,6 +130,7 @@ class Spotify:
             content = response.json()
             return self.json_return(content['item']['name'] + ' - ' + content['item']['album']['name'], False)
     
+    @check_token
     def search(self, track_name, first=False):
         url = self.base_url + 'search'
         try:
@@ -122,6 +160,7 @@ class Spotify:
             track_id = content['tracks']['items'][index]['uri']
             return album_name, track_name, track_id
 
+    @check_token
     def play(self, track_name, first=False):
         url = self.base_url + 'me/player/play'
         album, track, _id = self.search(track_name, first)
